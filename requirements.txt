@@ -1,0 +1,4 @@
+Flask
+openai
+cx_Oracle
+# oracledb
