@@ -10,12 +10,14 @@ CORS(app)  # Enable CORS for all domains on all routes
 def generateSegment():
 
     user_prompt = request.json.get('user_prompt')
+    print(user_prompt)
 
     res = enforce_json_structure(system_prompt = '''You are to extract the segment information from the user's query and complete the segment information based on the format''',
                     user_prompt = user_prompt,
                     # user_prompt = '''I want a oneoff segment named oldPeople which contains people over the age of fifty.''',
                     # user_prompt = '''I want a recurring segment named 3kids which contains people who have 3 kids.''',
                     # user_prompt = '''I want a oneoff segment named lowerClass which contains people who have an income of less than fifty thousand.''',
+                    # user_prompt = '''I want a oneoff segment named upperClass which contains people who have an income of more than 100,000.''',
 
                     output_format = {
                         "segmentName": "<segment name>",
@@ -29,6 +31,11 @@ def generateSegment():
                         }
                     )
     # print(res)
+
+    data = getSegmentRules(res['ruleParam'])
+    ruleid = data.get('ruleid')
+    print('Rule_ID: ' + str(ruleid))
+    # return str(ruleid)
 
     match res['ruleOperator']:
         case "=":
@@ -46,7 +53,7 @@ def generateSegment():
             ruleOperatorRecord = {
                 "ruleOperatorRecord": {
                     "text": "is greater than or equal to",
-                    "value": "greater_than_or_equal",
+                    "value": "greater_than_or_equal_to",
                     "operatorAny": False,
                     "operatorSymbol": ">="
                 }
@@ -77,7 +84,7 @@ def generateSegment():
                     "rules": [
                         {
                             "include": True,
-                            "ruleID": "1",
+                            "ruleID": str(ruleid),
                             "ruleOperator": res['ruleOperator'],
                             "ruleParam": res['ruleParam'].upper(),
                             "ruleGroupRecord": {
@@ -88,175 +95,148 @@ def generateSegment():
                                 "text": res['ruleParam'],
                                 "value": res['ruleParam'].upper()
                             },
-                            "ruleValue": res['ruleValue'],
-                            "sentenceText": f"Include People with an {res['ruleParam']} which  {res['ruleOperatorRecord']['text']}  {res['ruleValue']}",
+                            "ruleValue": str(res['ruleValue']),
+                            "sentenceText": f"Include People with an {res['ruleParam']} value which  {res['ruleOperatorRecord']['text']}  {res['ruleValue']}",
                             "ruleOperatorRecord": res['ruleOperatorRecord'],
                             "ruleValueRecord": {
-                                "value": res['ruleValue'],
-                                "text": res['ruleValue']
+                                "value": str(res['ruleValue']),
+                                "text": str(res['ruleValue'])
                             },
-                            "ruleType": "type:1",
+                            "ruleType": f"type:{str(ruleid)}",
                             "ruleTypeRecord": {
                                 "text": res['ruleParam'],
-                                "value": "type:1"
+                                "value": f"type:{str(ruleid)}"
                             }
                         }
                     ]
                 }
 
-    return jsonify(segStruc)
+
+
+    segment_id = createSegment(segStruc)
+    print("generateSegment Response: ")
+    print(segment_id)
+    print(segStruc)
+
+
+    if segment_id:
+        return jsonify({"message": "Segment created successfully.", "segmentID": segment_id}), 200
+    else:
+        return jsonify({"error": "Unable to retrieve segment ID."}), 500
+
+    # return segStruc
 
 def execute(sql, mode, **kwargs):
     try:
-        # Establish a connection to the database
         connection = oracledb.connect(user="RAMBO", password="biggun", dsn="STALLONE:1521/STALLONE")
-
-        # Create a cursor object
         cursor = connection.cursor()
+        parameters = kwargs.get('parameters', [])
 
-        if mode == 'P':  # Execute a procedure
-            procedure_name = sql
-            parameters = kwargs.get('parameters', [])
-            cursor.callproc(procedure_name, parameters)
+        if mode == 'P':  # Procedure
+            # parameters = kwargs.get('parameters', [])
+            out_param = None
+            if kwargs.get('has_out_param', False):
+                out_param = cursor.var(int)  # Assuming OUT param is needed
+                parameters.insert(0, out_param)  # If OUT param should be first
+            cursor.callproc(sql, parameters)
             connection.commit()
 
-        elif mode == 'Q':  # Execute a query
-            cursor.execute(sql)
+            if out_param is not None:
+                print("execute Response: ")
+                print(out_param.getvalue())
+                return out_param.getvalue()  # Return just the OUT param value
+
+        elif mode == 'Q':  # Execute a query with parameters
+            # parameters = kwargs.get('parameters', [])
+            print(parameters)
+            cursor.execute(sql, parameters)  # Execute with parameters
             rows = cursor.fetchall()
-            return rows
+            return rows  # Return fetched rows for queries
 
     except Exception as e:
-        print("An error occurred:", e)
+        print(f"An error occurred: {e}")
         return None
 
     finally:
-        # Close the cursor and connection
         cursor.close()
         connection.close()
 
 @app.route('/getOracleData', methods=['GET'])
-def getSegmentRules():
-    sql = "SELECT ruleid, field, field_name, operator, operator_name FROM segment_rules WHERE ruleid IN (1, 8, 9)"
-    # sql = "SELECT ruleid, field, field_name, operator, operator_name FROM segment_rules WHERE field_name = (Insert Rule Parameter)"
-    rows = execute(sql, 'Q')
+def getSegmentRules(field):
+    # sql = "SELECT ruleid, field, field_name, operator, operator_name FROM segment_rules WHERE ruleid IN (1, 8, 9)"
+
+    # Retrieve 'Field' parameter from the URL query string and convert it to uppercase
+    # field_param = request.args.get('field', '').upper()
+    field_param = field.upper()
+
+    # Construct a parameterized SQL query
+    sql = "SELECT ruleid, field, field_name, operator, operator_name FROM segment_rules WHERE field = :field_param"
+    # sql = "SELECT ruleid, field, field_name, operator, operator_name FROM segment_rules WHERE field = 'INCOME'"
+
+    # Execute the SQL query with parameter
+    rows = execute(sql, 'Q', parameters={"field_param": field_param})
+    # rows = execute(sql, 'Q')
 
     # Convert data into list of dictionaries
-    data = []
-    for row in rows:
-        data.append({
-            "ruleid": row[0],
-            "field": row[1],
-            "field_name": row[2],
-            "operator": row[3],
-            "operator_name": row[4]
-        })
+    # data = []
+    # for row in rows:
+    #     data.append({
+    #         "ruleid": row[0],
+    #         "field": row[1],
+    #         "field_name": row[2],
+    #         "operator": row[3],
+    #         "operator_name": row[4]
+    #     })
 
-    return jsonify(data)
+    # return jsonify(data)
     # return jsonify({"response": rows})
 
+    data = [{"ruleid": row[0], "field": row[1], "field_name": row[2], "operator": row[3], "operator_name": row[4]} for row in rows]
+    return data[0]
+
 @app.route('/createSegment', methods=['POST'])
-def createSegment():
-    # print('This works')
-    # sys.exit()
+def createSegment(segStruc):
     try:
         # Extract data from the request
-        # formData = request.json  # Assuming JSON data is sent in the request body
-
-        formData = {
-            "segmentID": None,
-            "segmentName": "MHT_segTest13",
-            "calculateWhen": "1",
-            "segCalc": "oneoff",
-            "segDaysToCalc": None,
-            "segStructure": "(S1=M)",
-            "segCalcType": "oneoff",
-            "rules": [
-                {
-                    "include": True,
-                    "ruleID": "9",
-                    "ruleOperator": "=",
-                    "ruleParam": "KIDS",
-                    "ruleGroupRecord": {
-                        "text": "Person Attributes",
-                        "value": "1"
-                    },
-                    "ruleParamRecord": {
-                        "text": "Kids",
-                        "value": "KIDS"
-                    },
-                    "ruleValue": "3",
-                    "sentenceText": "Include People with a number of Kids which is equal to 3",
-                    "ruleOperatorRecord": {
-                        "text": "is equal to",
-                        "value": "exact_match",
-                        "operatorAny": False,
-                        "operatorSymbol": "="
-                    },
-                    "ruleValueRecord": {
-                        "value": "3",
-                        "text": "3"
-                    },
-                    "ruleType": "type:9",
-                    "ruleTypeRecord": {
-                        "text": "Kids",
-                        "value": "type:9"
-                    }
-                }
-            ]
-        }
-
-        # formData2 = {"segmentID":None,"segmentName":"MHT_segTest8","calculateWhen":"1","segCalc":"oneoff","segDaysToCalc":None,"segStructure":"(S1=M)","segCalcType":"oneoff","rules":[{"include":True,"ruleID":"9","ruleOperator":"=","ruleParam":"KIDS","ruleGroupRecord":{"text":"Person Attributes","value":"1"},"ruleParamRecord":{"text":"Kids","value":"KIDS"},"ruleValue":"3","sentenceText":"Include People with a number of Kids which  is equal to  3","ruleOperatorRecord":{"text":"is equal to","value":"exact_match","operatorAny":False,"operatorSymbol":"="},"ruleValueRecord":{"value":"3","text":"3"},"ruleType":"type:9","ruleTypeRecord":{"text":"Kids","value":"type:9"}}]}
-
-        # Establish a connection to the database
-        connection = oracledb.connect(user="RAMBO", password="biggun", dsn="STALLONE:1521/STALLONE")
-
-        # Create a cursor object
-        cursor = connection.cursor()
-
-        # Define the variable to hold the OUT parameter
-        segment_id_var = cursor.var(int)
 
         # Convert formData to JSON string
-        segrulejson = json.dumps(formData, separators=(',', ':'))
+        segrulejson = json.dumps(segStruc, separators=(',', ':'))
 
-        # print(segrulejson)
+        # Define the parameters for the procedure call
+        parameters = [
+            segStruc.get('segmentName', ''),  # in_segmentname
+            '7107',                           # in_userid
+            '-299',                           # in_applicationid
+            segrulejson,                      # in_segrulejson
+            1,                                # in_calculate
+            1,                                # use inday data? 1 or 0
+            '',                               # in_descriptionbyuser
+            1                                 # Debug flag
+        ]
 
-        # Call the procedure
-        cursor.callproc('SegInterface.save_segment', [
-            segment_id_var,  # io_segmentid
-            formData.get('segmentName', ''), # in_segmentname
-            '7107', # in_userid
-            '-299', # in_applicationid
-            segrulejson, # in_segrulejson
-            1, # in_calculate
-            1, # / use inday data? 1 or 0
-            'AI Generated Segment 6', # in_descriptionbyuser
-            1 # Debug flag
-        ])
+        # Call the execute function to run the procedure
+        segment_id = execute('SegInterface.save_segment', 'P', parameters=parameters, has_out_param=True)
 
-        # # Retrieve the value of the OUT parameter
-        segment_id = segment_id_var.getvalue()
-        print("Segment ID:", segment_id)
+        print("createSegment Response: ")
+        print(segment_id)
 
-        # out_matches = cursor.var(int)
-        # out_last_calc_date = cursor.var(str)
-        # cursor.callproc('SegInterface.get_seg_calc_and_date', [
-        #     11893,
-        #     out_matches,
-        #     out_last_calc_date,
-        #     1
-        # ])
+        return segment_id
+        # return segrulejson
 
-        # print("Segment ID:", 11893)
-        # print("out_matches:", out_matches.getvalue())
-        # print("out_last_calc_date:", out_last_calc_date.getvalue())
+        # if segment_id:
+        #     return jsonify({"message": "Segment created successfully.", "segmentID": segment_id}), 200
+        # else:
+        #     return jsonify({"error": "Unable to retrieve segment ID."}), 500
 
-
-
+        # Retrieve the value of the OUT parameter
+        # segment_id = segment_id_var.getvalue()
+        # print("Segment ID:", segment_id)
 
         # Return a success response
         # return jsonify({"message": "Segment created successfully.", "out_matches": out_matches.getvalue(), "out_last_calc_date": out_last_calc_date.getvalue()}), 200
-        return jsonify({"message": "Segment created successfully.", "segmentID": segment_id}), 200
+        # return jsonify({"message": "Segment created successfully.", "segmentID": segment_id}), 200
+        # return jsonify({"message": "Segment Structure.", "Segment": segrulejson}), 200
+        # return jsonify({"message": "Segment Structure.", "Segment": segStruc}), 200
 
     except Exception as e:
         # Return an error response if an exception occurs
