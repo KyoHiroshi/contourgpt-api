@@ -1,5 +1,6 @@
 from flask import Flask, request, jsonify
 from flask_cors import CORS  # Import CORS
+from jsonschema import validate, ValidationError, Draft7Validator
 from contourgpt_v2 import enforce_json_structure
 import oracledb, json, sys
 
@@ -20,17 +21,38 @@ def generateSegment():
                     # user_prompt = '''I want a oneoff segment named upperClass which contains people who have an income of more than 100,000.''',
 
                     output_format = {
-                        "segmentName": "<segment name>",
-                        "segCalc": "<oneoff or recurring>",
-                        "segCalcType": "<oneoff or recurring>",
-                        "ruleParam": "Specified rule parameter, type: str['Age', 'Income', 'Kids']",
-                        "ruleOperator": "Symbol for operator, type: str['=', '>=', '<=']",
-                        "operatorText": "Operator description, str['is equal to', 'greater than or equal to', 'less than or equal to']",
-                        "sentenceText": "Include People with an <ruleParam> value which  <operatorText>  <value>",
-                        "ruleValue": "Value supplied by user, type: int"
+                        "segmentName": "<segment name> or ''",
+                        "segCalc": "<oneoff or recurring> or ''",
+                        "segCalcType": "<oneoff or recurring> or ''",
+                        "ruleParam": "Specified rule parameter, type: str['Age', 'Income', 'Kids'] or ''",
+                        "ruleOperator": "Symbol for operator, type: str['=', '>=', '<='] or ''",
+                        "ruleValue": "Value supplied by user, type: int. User must provide value, otherwise set to empty string"
                         }
                     )
     # print(res)
+
+    # Checking if user has missed out any information
+    is_valid, error_details = validate_data(res)
+    if not is_valid:
+        print("Validation errors found:")
+        for error in error_details:
+            print(error)
+        return jsonify({"success": False, "errors": error_details}), 200
+    else:
+        print("Data is valid.")
+
+    # Check if the segment name already exists
+    sql = "SELECT * FROM segment WHERE name = :segment_name"
+    rows = execute(sql, 'Q', parameters={"segment_name": res['segmentName']})
+
+    if rows and rows[0][0] > 0:
+        return jsonify({"success": False, "errors": ["Segment name already in use."]}), 400
+
+    # data = [{"segmentid": row[0], "name": row[1]} for row in rows]
+    # return jsonify({"data": data[0], "success": True}), 200
+
+    return res
+
 
     data = getSegmentRules(res['ruleParam'])
     ruleid = data.get('ruleid')
@@ -113,18 +135,48 @@ def generateSegment():
 
 
 
-    segment_id = createSegment(segStruc)
-    print("generateSegment Response: ")
-    print(segment_id)
-    print(segStruc)
+    # segment_id = createSegment(segStruc)
+    # print("generateSegment Response: ")
+    # print(segment_id)
+    # print(segStruc)
 
 
-    if segment_id:
-        return jsonify({"message": "Segment created successfully.", "segmentID": segment_id}), 200
-    else:
-        return jsonify({"error": "Unable to retrieve segment ID."}), 500
+    # if segment_id:
+    #     return jsonify({"message": "Segment created successfully.", "segmentID": segment_id}), 200
+    # else:
+    #     return jsonify({"error": "Unable to retrieve segment ID."}), 500
 
     # return segStruc
+
+def validate_data(data):
+    # Convert ruleValue to string if present and not already a string
+    if 'ruleValue' in data and not isinstance(data['ruleValue'], str):
+        data['ruleValue'] = str(data['ruleValue'])
+
+    schema = {
+        "type": "object",
+        "properties": {
+            "segmentName": {"type": "string", "minLength": 1},
+            "segCalc": {"type": "string", "minLength": 1},
+            "ruleParam": {"type": "string", "minLength": 1},
+            "ruleOperator": {"type": "string", "minLength": 1},
+            "ruleValue": {"type": "string", "minLength": 1}
+        },
+        "required": ["segmentName", "segCalc", "ruleParam", "ruleOperator", "ruleValue"]
+    }
+
+    validator = Draft7Validator(schema)
+    errors = list(validator.iter_errors(data))
+
+    error_messages = {}
+    for error in errors:
+        field_name = error.path[0] if error.path else 'General'
+        if error.validator in ['required', 'minLength']:
+            error_messages[field_name] = "Missing all required fields, please see example description."
+        else:
+            error_messages[field_name] = error.message
+
+    return False, error_messages if errors else (True, {})
 
 def execute(sql, mode, **kwargs):
     try:
