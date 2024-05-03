@@ -41,13 +41,6 @@ def generateSegment():
     else:
         print("Data is valid.")
 
-    # Check if the segment name already exists
-    sql = "SELECT * FROM segment WHERE name = :segment_name"
-    rows = execute(sql, 'Q', parameters={"segment_name": res['segmentName']})
-
-    if rows and rows[0][0] > 0:
-        return jsonify({"success": False, "errors": ["Segment name already in use."]}), 400
-
     # data = [{"segmentid": row[0], "name": row[1]} for row in rows]
     # return jsonify({"data": data[0], "success": True}), 200
 
@@ -149,10 +142,22 @@ def generateSegment():
     # return segStruc
 
 def validate_data(data):
-    # Convert ruleValue to string if present and not already a string
+    error_messages = {}
+
+    # Convert ruleValue to string if it's present and not already a string
     if 'ruleValue' in data and not isinstance(data['ruleValue'], str):
         data['ruleValue'] = str(data['ruleValue'])
 
+    # Custom error messages
+    custom_messages = {
+        'segmentName': "Please specify a name for the segment.",
+        'segCalc': "Please specify a calculation type, e.g., One-off or Recurring.",
+        'ruleParam': "Please specify a parameter, e.g., Age, Income, Kids.",
+        'ruleOperator': "Please specify an operator, e.g., '=', '>=', '<='.",
+        'ruleValue': "Please specify a value for the rule."
+    }
+
+    # JSON Schema validation
     schema = {
         "type": "object",
         "properties": {
@@ -168,15 +173,19 @@ def validate_data(data):
     validator = Draft7Validator(schema)
     errors = list(validator.iter_errors(data))
 
-    error_messages = {}
     for error in errors:
         field_name = error.path[0] if error.path else 'General'
-        if error.validator in ['required', 'minLength']:
-            error_messages[field_name] = "Missing all required fields, please see example description."
-        else:
-            error_messages[field_name] = error.message
+        # Use custom messages if defined
+        error_messages[field_name] = custom_messages.get(field_name, "Invalid input.")
 
-    return False, error_messages if errors else (True, {})
+    # Check if the segment name already exists
+    if 'segmentName' in data and data['segmentName']:
+        sql = "SELECT COUNT(*) FROM segment WHERE name = :segment_name"
+        rows = execute(sql, 'Q', parameters={"segment_name": data['segmentName']})
+        if rows and rows[0][0] > 0:
+            error_messages['segmentName'] = "Segment name already in use."
+
+    return False, error_messages if error_messages else (True, {})
 
 def execute(sql, mode, **kwargs):
     try:
