@@ -41,10 +41,10 @@ def generateSegment():
     else:
         print("Data is valid.")
 
-    # data = [{"segmentid": row[0], "name": row[1]} for row in rows]
-    # return jsonify({"data": data[0], "success": True}), 200
+    # # data = [{"segmentid": row[0], "name": row[1]} for row in rows]
+    # # return jsonify({"data": data[0], "success": True}), 200
 
-    return res
+    # return res
 
 
     data = getSegmentRules(res['ruleParam'])
@@ -63,7 +63,7 @@ def generateSegment():
                 }
             }
             res.update(ruleOperatorRecord)
-        case ">":
+        case ">" | ">=":
             res['ruleOperator'] = ">="
             ruleOperatorRecord = {
                 "ruleOperatorRecord": {
@@ -74,7 +74,7 @@ def generateSegment():
                 }
             }
             res.update(ruleOperatorRecord)
-        case "<":
+        case "<" | "<=":
             res['ruleOperator'] = "<="
             ruleOperatorRecord = {
                 "ruleOperatorRecord": {
@@ -128,16 +128,16 @@ def generateSegment():
 
 
 
-    # segment_id = createSegment(segStruc)
-    # print("generateSegment Response: ")
-    # print(segment_id)
-    # print(segStruc)
+    segment_id = createSegment(segStruc)
+    print("generateSegment Response: ")
+    print(segment_id)
+    print(segStruc)
 
 
-    # if segment_id:
-    #     return jsonify({"message": "Segment created successfully.", "segmentID": segment_id}), 200
-    # else:
-    #     return jsonify({"error": "Unable to retrieve segment ID."}), 500
+    if segment_id:
+        return jsonify({"success": True, "message": "Segment created successfully.", "segmentID": segment_id}), 200
+    else:
+        return jsonify({"success": False, "error": "Unable to retrieve segment ID."}), 500
 
     # return segStruc
 
